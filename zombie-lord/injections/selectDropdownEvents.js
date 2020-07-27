@@ -1,3 +1,4 @@
+/* eslint-disable no-inner-declarations */
 /*
   This provides event for
   select box opening and select box closing
@@ -59,7 +60,7 @@
     self.setSelectValue = makeValueSetter(selectEl);
   }
 
-  function close(selectEl) {
+  function close(/*selectEl*/) {
     closed = true;
     s({selectOpen:false});
   }
@@ -83,3 +84,4 @@
     console.log(JSON.stringify({selectInput:o}));
   }
 }
+/* eslint-enable no-inner-declarations */

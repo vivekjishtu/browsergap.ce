@@ -1,4 +1,4 @@
-import {URL} from 'url';
+//import {URL} from 'url';
 import NEWTAB_RESPONSE from './newtabResponse.js';
 
 let interceptId = 0;
@@ -91,5 +91,5 @@ export async function onInterceptRequest({sessionId, message}, Target) {
       console.warn("Issue with continuing request", e);
     }
   }
-};
+}
 

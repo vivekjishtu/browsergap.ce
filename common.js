@@ -1,12 +1,20 @@
+import fs from 'fs';
 import path from 'path';
-import {FRAME_CONTROL, IMAGE_FORMAT} from './public/translateVoodooCRDP.js';
+import {fileURLToPath} from 'url';
+
 import branchName from 'current-git-branch';
+import {FRAME_CONTROL, IMAGE_FORMAT} from './public/translateVoodooCRDP.js';
 
 export const DEBUG = {
+  mode: 'dev',
+  goSecure: true,
+  noAudio: false,
   legacyShots: !FRAME_CONTROL,      /* until enableBeginFrameControl can be set for any target
-                                      whether created with createTarget or simply spawning, 
-                                      we must use legacy shots */
+    whether created with createTarget or simply spawning, 
+    we must use legacy shots */
   IMAGE_FORMAT,                     /* JPEG, PNG, or WEBP (if supported (so not Safari)) */
+  commands: false,
+  shotDebug: false,
   noShot: false,
   dev: false,
   val: 0,
@@ -15,7 +23,10 @@ export const DEBUG = {
   high: 5
 };
 
-export const GO_SECURE = false;
+// test for webpack
+//export const APP_ROOT = path.dirname(fileURLToPath(import.meta.url));
+export const APP_ROOT = __dirname;
+export const GO_SECURE = fs.existsSync(path.resolve(APP_ROOT, 'sslcert', 'master', 'privkey.pem'));
 
 export const STAGING = branchName() == 'staging';
 export const MASTER = branchName() == 'master';

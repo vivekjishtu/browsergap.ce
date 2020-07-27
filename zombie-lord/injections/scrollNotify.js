@@ -1,3 +1,4 @@
+/* eslint-disable no-inner-declarations */
 {
   const THROTTLE_MS = 200;
   const WAIT_FOR_SCROLL = 150;
@@ -69,9 +70,10 @@
     console.log(JSON.stringify({scroll:o}));
   }
 
-  function err(e) {
+  function err(/*e*/) {
     // DEBUG: no need to show error now because it works
+    // console.log(JSON.stringify({error:e}));
     return;
-    console.log(JSON.stringify({error:e}));
   }
 }
+/* eslint-enable no-inner-declarations */

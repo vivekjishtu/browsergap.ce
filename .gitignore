@@ -1,10 +1,16 @@
+BrowserGap
+BrowserGap*
+typetests
+vim.exe.stackdump
+*.stackdump
+debug.log
+auto_killer_data
 file_transfer_groups
 node_modules
-certs/*
-sslcerts/*
+sslcert/*
 .*.swp
 isolate*
-public/bundle*
-public/meta_bundle*
+public/bundle*.js
+public/meta_bundle*.js
 nohup.out
 

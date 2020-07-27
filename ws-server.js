@@ -5,14 +5,17 @@
   import multer from 'multer';
   import WebSocket from 'ws';
   import fs from 'fs';
+  import os from 'os';
   import path from 'path';
   import bodyParser from 'body-parser';
   import cookieParser from 'cookie-parser';
   import {pluginsDemoPage} from './public/plugins/demo/page.js';
   import zl from './zombie-lord/api.js';
   import {start_mode} from './args.js';
-  import {version, BRANCH, COOKIENAME, GO_SECURE, DEBUG, CONNECTION_ID_URL} from './common.js';
+  import {version, /*APP_ROOT,*/ BRANCH, COOKIENAME, GO_SECURE, DEBUG} from './common.js';
   import {timedSend, eventSendLoop} from './server.js';
+
+  export const fileChoosers = new Map();
 
   const protocol = GO_SECURE ? https : http;
   const COOKIE_OPTS = {
@@ -22,12 +25,17 @@
     sameSite: 'Strict'
   };
 
-	const storage = multer.diskStorage({
-		destination: (req, file, cb) => cb(null, path.join(__dirname,'..', 'uploads')),
-		filename: (req, file, cb) => {
-			return cb(null, nextFileName(path.extname(file.originalname)))
-		}
-	});
+  const uploadPath = path.resolve(os.homedir(), 'uploads');
+  if ( ! fs.existsSync(uploadPath) ) {
+    fs.mkdirSync(uploadPath, {recursive:true});
+  }
+
+  const storage = multer.diskStorage({
+    destination: (req, file, cb) => cb(null, uploadPath),
+    filename: (req, file, cb) => {
+      return cb(null, nextFileName(path.extname(file.originalname)))
+    }
+  });
   const upload = multer({storage});
 
   const Queue = {
@@ -41,17 +49,21 @@
   let requestId = 0;
 
   export async function start_ws_server(port, zombie_port, allowed_user_cookie, session_token) {
-    console.log(`Starting websocket server on ${port}`);
+    DEBUG.val && console.log(`Starting websocket server on ${port}`);
     const app = express();
     const server_port = port;
 
     app.use(bodyParser.urlencoded({extended:true}));
-    app.use(bodyParser.json({extended:true}));
+    app.use(bodyParser.json());
     app.use(cookieParser());
     if ( start_mode == "signup" ) {
       app.get("/", (req,res) => res.sendFile(path.join(__dirname, 'public', 'index.html'))); 
     } else {
-      app.get("/", (req,res) => res.sendFile(path.join(__dirname, 'public', 'image.html'))); 
+      if ( DEBUG.mode == 'dev' ) {
+        app.get("/", (req,res) => res.sendFile(path.join(__dirname, 'public', 'image.html'))); 
+      } else {
+        app.get("/", (req,res) => res.sendFile(path.join(__dirname, 'public', 'bundle.html'))); 
+      }
       app.get("/login", (req,res) => {
         const {token,ran} = req.query; 
         if ( token == session_token ) {
@@ -68,7 +80,7 @@
         }
       }); 
     }
-    app.use(express.static('public'));
+    app.use(express.static(path.resolve(__dirname,'public')));
     app.post('/current/:current/event/:event', wrap(async (req, res) => {
       const actualUri = 'https://' + req.headers.host + ':8001' + req.url;
       const resp = await fetch(actualUri, {method: 'POST', body: JSON.stringify(req.body), 
@@ -97,6 +109,7 @@
     wss.on('connection', (ws, req) => {
       const cookie = req.headers.cookie;
       zl.act.saveIP(req.connection.remoteAddress);
+      DEBUG.val && console.log({connectionIp:req.connection.remoteAddress});
       if ( DEBUG.dev || allowed_user_cookie == 'cookie' || 
         (cookie && cookie.includes(`${COOKIENAME}=${allowed_user_cookie}`)) ) {
         zl.life.onDeath(zombie_port, () => {
@@ -109,14 +122,14 @@
 
             message = JSON.parse(message);
 
-            const {zombie, tabs, messageId} = message;	
+            const {zombie, tabs, messageId} = message;  
 
             try {
               if ( zombie ) {
                 const {events} = zombie;
                 let {receivesFrames} = zombie;
 
-                if ( !!receivesFrames ) {
+                if ( receivesFrames ) {
                   // switch it on in DEBUG and save it on the websocket for all future events
                   DEBUG.noShot = false;
                   ws.receivesFrames = receivesFrames;
@@ -178,14 +191,14 @@
         process.exit(1);
       } else {
         addHandlers();
-        console.log({uptime:new Date, message:'websocket server up', server_port});
+        DEBUG.val && console.log({uptime:new Date, message:'websocket server up', server_port});
       }
     });
 
     function so(socket, message) {
       if ( !message ) return;
       if ( typeof message == "string" || Array.isArray(message) ){
-        message = message;
+        message;
       } else {
         message = JSON.stringify(message);
       }
@@ -227,7 +240,7 @@
           throw e;
         }
       }));
-      app.post("/file", upload.array("files", 6), async (req,res) => {
+      app.post("/file", upload.array("files", 10), async (req,res) => {
         const cookie = req.cookies[COOKIENAME];
         if ( !DEBUG.dev && allowed_user_cookie !== 'cookie' &&
           (cookie !== allowed_user_cookie) ) { 
@@ -235,42 +248,66 @@
         }
         const {files} = req;
         const {sessionid:sessionId} = req.body;
+        const backendNodeId = fileChoosers.get(sessionId);
         const action = ! files || files.length == 0 ? 'cancel' : 'accept';
+        /**
+        const fileInputResult = await zl.act.send({
+          name:"Runtime.evaluate",
+          params: {
+            expression: "self.zombieDosyLastClicked.fileInput"
+          }, 
+          definitelyWait: true,
+          sessionId
+        }, zombie_port);
+        console.log({fileInputResult, s:JSON.stringify(fileInputResult)});
+        const objectId = fileInputResult.data.result.objectId;
+        **/
         const command = {
-          name: "Page.handleFileChooser",
+          name: "DOM.setFileInputFiles",
           params: {
             files: files && files.map(({path}) => path),
-            action
+            backendNodeId
           },
           sessionId
         };
         DEBUG.val > DEBUG.med && console.log("We need to send the right command to the browser session", files, sessionId, action, command);
-        const result = await zl.act.send(command, zombie_port);
-        if ( result.error ) {
+        let result;
+        
+        try {
+          result = await zl.act.send(command, zombie_port);
+        } catch(e) {
+          console.log("Error sending file input command", e);
+        }
+
+        DEBUG.val > DEBUG.med && console.log({fileResult:result});
+
+        if ( !result || result.error ) {
           res.status(500).send(JSON.stringify({error:'there was an error attaching the files'}));
         } else {
-          DEBUG.val > DEBUG.med && console.log("Sent files to file input", result, files);
-          const result = {
+          result = {
             success: true,
-            files: files.map(({originalName,size}) => ({name:originalName,size}))
+            files: files.map(({originalname,size}) => ({name:originalname,size}))
           };
-          res.json(files);
+          DEBUG.val > DEBUG.med && console.log("Sent files to file input", result, files);
+          res.json(result);
         }
       }); 
       // error handling middleware
         app.use('*', (err, req, res, next) => {
           try {
             res.type('json');
-          } catch(e){}
-          let message = '';
-          if ( DEBUG.dev && DEBUG.val ) {
-            message = s({error: { msg: err.message, stack: err.stack.split(/\n/g) }});
-          } else {
-            message = s({error: err.message || err+'', resetRequired:true});
+          } finally {
+            let message = '';
+            if ( DEBUG.dev && DEBUG.val ) {
+              message = s({error: { msg: err.message, stack: err.stack.split(/\n/g) }});
+            } else {
+              message = s({error: err.message || err+'', resetRequired:true});
+            }
+            res.write(message);
+            res.end();
+            console.warn(err);
+            next();
           }
-          res.write(message);
-          res.end();
-          console.warn(err);
         });
     }
 
@@ -319,10 +356,13 @@
       }
   }
 
-	function nextFileName(ext = '') {
-	  if ( ! ext.startsWith('.') ) {
+  function nextFileName(ext = '') {
+    //console.log({nextFileName:{ext}});
+    if ( ! ext.startsWith('.') ) {
       ext = '.' + ext;
     }
-		return `file${(Math.random()*1000000).toString(36)}${ext}`;
-	}
+    const name = `file${(Math.random()*1000000).toString(36)}${ext}`;
+    //console.log({nextFileName:{name}});
+    return name;
+  }
  

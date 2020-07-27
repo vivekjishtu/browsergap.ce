@@ -1,10 +1,10 @@
-import {DEBUG, deviceIsMobile} from '../common.js';
-import {R,X} from '../../node_modules/brutalist-web/r.js';
+import {deviceIsMobile} from '../common.js';
+import {d as R, u as X} from '../../node_modules/dumbass/r.js';
 import {openModal} from './index.js';
 
 const CLOSE_DELAY = 222;
 const SHORT_CUT = 'Ctrl+Shift+J';
-const FUNC = e => console.log("Doing it", e);
+//const FUNC = e => console.log("Doing it", e);
 
 const CONTEXT_MENU = {
   'page': [
@@ -60,22 +60,36 @@ const CONTEXT_MENU = {
   ], 
 };
 
-export function ContextMenu(state) {
+export function ContextMenu(/*state*/) {
   return R`
 
   `;
 }
 
 export function makeContextMenuHandler(state, node = {type:'page', id: 'current-page'}) {
-  const {id, type:nodeType} = node;
+  const {/*id, */ type:nodeType} = node;
   const menuItems = CONTEXT_MENU[nodeType];
 
   return contextMenu => {
     // we need this check because we attach a handler to each node
     // we could use delegation at the container of the root node
     // but for now we do it like this
+    if ( navigator.vibrate ) {
+      try {
+        navigator.vibrate(100);
+      } catch(e) {
+        console.warn('error vibrating', e);
+      }
+    }
     if ( contextMenu.currentTarget.contains(contextMenu.target) ) {
-      const {pageX, pageY} = contextMenu;
+      let pageX, pageY;
+      if ( contextMenu.pageX && contextMenu.pageY ) {
+        ({pageX, pageY} = contextMenu);
+      } else {
+        const {clientX, clientY} = contextMenu.detail;
+        ({pageX, pageY} = contextMenu.detail);
+        Object.assign(contextMenu, {pageX, pageY, clientX, clientY});
+      }
       // cancel click for chrome mobile
       // (note: this does not work as intended. 
       // It does not cancel a touch click on contextmenu open)
@@ -95,7 +109,7 @@ export function makeContextMenuHandler(state, node = {type:'page', id: 'current-
           close(state, false);
           state.viewState.contextMenu = el;
         },
-        el => self.addEventListener('click', function remove(click) {
+        () => self.addEventListener('click', function remove(click) {
           // if we clicked outside the menu, 
           // remove the menu and stop listening for such clicks
           if ( ! click.target.closest('.context-menu') ) {
@@ -111,8 +125,8 @@ export function makeContextMenuHandler(state, node = {type:'page', id: 'current-
           } else {
             el.style.left = x;
           }
-          if ( pageY + el.scrollHeight > innerHeight )  {
-            el.style.bottom = '8px';
+          if ( pageY + el.scrollHeight > ( innerHeight - 32 ))  {
+            el.style.bottom = '48px';
           } else {
             el.style.top = y;
           }
@@ -159,7 +173,7 @@ function close(state, delay = true) {
   }
 }
 
-function styleContextMenu(el, state) {
+/*function styleContextMenu(el, state) {
   return `
       * .context-menu {
         position: absolute;
@@ -194,7 +208,7 @@ function styleContextMenu(el, state) {
         background: powderblue;
       }
   `;
-}
+}*/
 
 // context menu option functions
   /**
@@ -272,7 +286,7 @@ function styleContextMenu(el, state) {
       close(state);
       const timeNow = new Date();
       const stringTime = timeNow.toJSON(); 
-      const fileName = stringTime.replace(/[-:\.]/g, "_");
+      const fileName = stringTime.replace(/[-:.]/g, "_");
       const imageData = state.viewState.canvasEl.toDataURL();
       const downloader = document.createElement('a');
       downloader.href = imageData;
@@ -288,7 +302,7 @@ function styleContextMenu(el, state) {
       downloader.remove();
     }
 
-    function reload(click, state) {
+    function reload(/*click, state*/) {
       const goButton = document.querySelector('form.url button.go');
       goButton.click();
     }

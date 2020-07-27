@@ -1,19 +1,27 @@
 import {DEBUG} from '../common.js';
 import sharp from 'sharp';
 
+const MAX_FRAMES = 3; /* 1, 2, 4 */
+const MIN_TIME_BETWEEN_SHOTS = 150; /* 20, 40, 100, 250, 500 */
+const MIN_TIME_BETWEEN_TAIL_SHOTS = 250;
+const MAX_TIME_BETWEEN_TAIL_SHOTS = 3000;
+const NOIMAGE = {img: '', frame:0};
+const KEYS = [
+  1, 11, 13, 629, 1229, 2046, 17912, 37953, 92194, 151840
+];
 // image formats for capture depend on what the client can accept
-  const SAFARI_FORMAT = {
-    format: "jpeg",
-    quality: 21 /* 25, 50, 80, 90, 100 */
-  };
   const WEBP_FORMAT = {
     format: "png"
+  };
+  const SAFARI_FORMAT = {
+    format: "jpeg",
+    quality: 35 /* 25, 50, 80, 90, 100 */
   };
   const SAFARI_SHOT = {
     command: {
       name: DEBUG.legacyShots ? "Page.captureScreenshot" : "HeadlessExperimental.beginFrame",
       params: DEBUG.legacyShots ? SAFARI_FORMAT : {
-        interval: 40, /* ms between frames */
+        interval: MIN_TIME_BETWEEN_SHOTS, /* ms between frames */
         screenshot : SAFARI_FORMAT
       }
     }
@@ -22,66 +30,97 @@ import sharp from 'sharp';
     command: {
       name: DEBUG.legacyShots ? "Page.captureScreenshot" : "HeadlessExperimental.beginFrame",
       params: DEBUG.legacyShots ? WEBP_FORMAT : {
-        interval: 40, /* ms between frames */
+        interval: MIN_TIME_BETWEEN_SHOTS, /* ms between frames */
         screenshot : WEBP_FORMAT
       }
     }
   };
-
-const WEBP_OPTS = {
-  quality: 42,
-};
-const MAX_FRAMES = 2; /* 1, 2, 4 */
-const MIN_TIME_BETWEEN_SHOTS = 200; /* 20, 40, 100, 250, 500 */
-const MIN_TIME_BETWEEN_TAIL_SHOTS = 100; /* 40, 100, 250, 500 */
-const MAX_TIME_BETWEEN_TAIL_SHOTS = 2000;
-
-let frameId = 1;
-let lastHash;
-let tailShotTime = MIN_TIME_BETWEEN_TAIL_SHOTS;
+  const WEBP_OPTS = {
+    quality: 44,
+  };
 
 export function makeCamera(connection) {
-  let tailShot;
+  let shooting = false;
+  let frameId = 1;
+  let lastHash;
+  let lastShot = Date.now();
   let nextShot;
-  let lastShot;
+  let tailShot, tailShotDelay = MIN_TIME_BETWEEN_TAIL_SHOTS;
 
-  return doShot;
+  const nextTailShot = () => {
+    DEBUG.shotDebug && console.log("Tail shot");
+    doShot();
+    tailShotDelay *= 1.618;
+    if ( tailShotDelay < MAX_TIME_BETWEEN_TAIL_SHOTS ) {
+      if ( tailShot ) {
+        clearTimeout(tailShot);
+      }
+      tailShot = setTimeout(nextTailShot, tailShotDelay);
+    } else {
+      tailShotDelay = MIN_TIME_BETWEEN_TAIL_SHOTS;
+      tailShot = false;
+    }
+  };
+
+  return {queueTailShot, doShot};
+
+  function queueTailShot() {
+    if ( tailShot ) {
+      clearTimeout(tailShot);
+      tailShotDelay = MIN_TIME_BETWEEN_TAIL_SHOTS;
+      tailShot = false;
+    }
+    tailShot = setTimeout(nextTailShot, tailShotDelay);
+  }
 
   async function shot() {
-    if ( DEBUG.noShot ) return;
-    if ( DEBUG.val > DEBUG.low ) {
-      const timeNow = Date.now();
-      console.log("Do shot", timeNow - lastShot);
-      lastShot = timeNow;
+    if ( DEBUG.noShot ) return NOIMAGE;
+    const timeNow = Date.now();
+    const dur = timeNow - lastShot;
+    if ( dur < MIN_TIME_BETWEEN_SHOTS ) {
+      if ( DEBUG.shotDebug && DEBUG.val > DEBUG.low ) {
+        console.log(`Dropping as duration (${dur}) too short.`);
+      }
+      return NOIMAGE;
+    }
+    if ( DEBUG.shotDebug && DEBUG.val > DEBUG.low ) {
+      console.log(`Do shot ${dur}ms`);
     }
     const targetId = connection.sessions.get(connection.sessionId);
-    try {
-      let response;
-      const ShotCommand = (connection.isSafari ? SAFARI_SHOT : WEBP_SHOT).command;
-      DEBUG.val > DEBUG.med && console.log(`XCHK screenShot.js (${ShotCommand.name}) call response`, ShotCommand, response ? JSON.stringify(response).slice(0,140) : response );
-      response = await connection.sessionSend(ShotCommand);
-      response = response || {};
-      const {data,screenshotData} = response;
-      frameId++;
-      if ( !! data || !! screenshotData ) {
-        const img = Buffer.from(data || screenshotData, 'base64');
-        const F = {img, frame: frameId, targetId};
-        await forExport({frame:F, connection});
-        F.hash = F.img;
-        return F;
+    let response;
+    const ShotCommand = (connection.isSafari || connection.isFirefox ? SAFARI_SHOT : WEBP_SHOT).command;
+    DEBUG.shotDebug && console.log(`XCHK screenShot.js (${ShotCommand.name}) call response`, ShotCommand, response ? JSON.stringify(response).slice(0,140) : response );
+    response = await connection.sessionSend(ShotCommand);
+    lastShot = timeNow;
+    response = response || {};
+    const {data,screenshotData} = response;
+    frameId++;
+    if ( !! data || !! screenshotData ) {
+      const img = data || screenshotData;
+      const F = {img, frame: frameId, targetId};
+      F.hash = `${F.img.length}${KEYS.map(k => F.img[k]).join('')}${F.img[F.img.length-1]}`;
+      if ( lastHash == F.hash ) {
+        if ( DEBUG.shotDebug && DEBUG.val > DEBUG.low ) {
+          console.log(`Dropping as image did not change.`);
+        }
+        return NOIMAGE;
       } else {
-        DEBUG.val > DEBUG.med && console.log("Sending no frame");
-        return {img: '', frame:0};
+        lastHash = F.hash;
+        await forExport({frame:F, connection});
+        return F;
       }
-    } catch(e) {
-      console.warn(e);
-      return {img: '', frame:0};
+    } else {
+      DEBUG.val > DEBUG.med && console.log("Sending no frame");
+      if ( DEBUG.shotDebug && DEBUG.val > DEBUG.low ) {
+        console.log(`Dropping as shot produced no data.`);
+      }
+      return NOIMAGE;
     }
   }
 
-  async function saveShot({tail:tail = false} = {}) {
+  async function saveShot() {
     const F = await shot();        
-    if ( !! F.img ) {
+    if ( F.img ) {
       connection.frameBuffer.push(F);
 
       while ( connection.frameBuffer.length > MAX_FRAMES ) {
@@ -89,42 +128,24 @@ export function makeCamera(connection) {
       }
     }
 
-    if ( ! tail ) {
-      clearTimeout(tailShot);
-      tailShot = setTimeout(doTailShot, tailShotTime);
-    }
-    DEBUG.val > DEBUG.high && console.log({framesWaiting:connection.frameBuffer.length, now: Date.now()});
+    queueTailShot();
+
+    DEBUG.shotDebug && console.log({framesWaiting:connection.frameBuffer.length, now: Date.now()});
   }
 
-  async function doTailShot() {
-    if ( tailShot ) {
-      clearTimeout(tailShot);
-    }
-    DEBUG.val > DEBUG.low && console.log("Tail shot");
-    await saveShot({tail:true});
-    DEBUG.val > DEBUG.med && console.log("Doing tail shot");
-    if ( tailShotTime < MAX_TIME_BETWEEN_TAIL_SHOTS) {
-      tailShot = setTimeout(doTailShot, tailShotTime);
-      tailShotTime = 1.618*tailShotTime;
-    } else {
-      tailShotTime = MIN_TIME_BETWEEN_TAIL_SHOTS;
-    }
-  }
-
-  // throttled && debounced with tail 
   async function doShot() {
-    if ( nextShot ) return;
-    nextShot = setTimeout(() => { 
-      nextShot = false; 
-      DEBUG.val > DEBUG.med && !DEBUG.noShot && console.log(`Doing shot ${Date.now()}`);
-      saveShot();
-    }, MIN_TIME_BETWEEN_SHOTS);
+    if ( nextShot || shooting ) return;
+    shooting = true;
+    await saveShot();
+    nextShot = setTimeout(() => nextShot = false, MIN_TIME_BETWEEN_SHOTS);
+    shooting = false;
   }
 }
 
 export async function forExport({frame, connection}) {
   let {img} = frame;
   // FIXME : CPU issues
+  img = Buffer.from(img, 'base64');
   if ( ! connection.isSafari ) {
     img = await sharp(img).webp(WEBP_OPTS).toBuffer();
   }
@@ -133,29 +154,4 @@ export async function forExport({frame, connection}) {
   return frame;
 }
 
-export async function frameHash(frame) {
-  // updated to use current (Nov 2019) Sharp API.
-  // from:
-  // https://github.com/lovell/sharp/commit/c15994812756c206987d29102471e69c6bbd3fc1#diff-900514821d804f6815b2dcd954387ac4
-  // Generates a 64-bit(<s>-as-binary-string</s>) image fingerprint
-  // Based on the dHash gradient method - see http://www.hackerfactor.com/blog/index.php?/archives/529-Kind-of-Like-That.html
-  let data = await sharp(frame.img)
-    .greyscale()
-    .normalise()
-    .resize(27, 10, {fit: 'fill', kernel: 'mitchell'})
-    .raw()
-    .toBuffer(); 
 
-  let fingerprint = '';
-
-  for (let col = 0; col < 26; col++) {
-    let gradient = 0;
-    for (var row = 0; row < 10; row++) {
-      let left = data[row * 26 + col];
-      let right = data[row * 26 + col + 1];
-      fingerprint = fingerprint + (left < right ? '1' : '0');
-    }
-  }
-
-  return fingerprint;
-}

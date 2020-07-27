@@ -7,10 +7,13 @@ export const WorldName = 'PlanetZanj';
 
 const SHORT_TIMEOUT = 1000;
 
+const MIN_DELTA = 40;
+const MIN_PIX_DELTA = 8;
+const THRESHOLD_DELTA = 1;
 const DOM_DELTA_PIXEL = 0;
 const DOM_DELTA_LINE = 1;
 const DOM_DELTA_PAGE = 2;
-const LINE_HEIGHT_GUESS = 22;
+const LINE_HEIGHT_GUESS = 32;
 
 const SYNTHETIC_CTRL = e => keyEvent({key:'Control',originalType:e.originalType}, 2, true);
 
@@ -28,7 +31,6 @@ function translator(e, handled = {type:'case'}) {
           },
         }
       };
-      break;
     }
     case "mousedown": case "mouseup": case "mousemove": 
     case "pointerdown": case "pointerup": case "pointermove": {
@@ -55,16 +57,36 @@ function translator(e, handled = {type:'case'}) {
           requiresShot: ! e.originalEvent.noShot && e.type.endsWith("down") 
         }
       };
-      break;
     }
     case "wheel": {
       // if we use emulateTouchFromMouseEvent we need a button value
       const deltaMode = e.originalEvent.deltaMode;
       const deltaX = adjustWheelDeltaByMode(e.originalEvent.deltaX, deltaMode);
       const deltaY = adjustWheelDeltaByMode(e.originalEvent.deltaY, deltaMode);
-      const retVal = mouseEvent(e, deltaX, deltaY);
+      const {contextId} = e;
+      const clientX = 0;
+      const clientY = 0
+      const deltas = {deltaX,deltaY,clientX,clientY};
+      let retVal;
+      if ( deltaX > MIN_DELTA || deltaY > MIN_DELTA ) {
+        const retVal1 = {
+          command: {
+            name: "Runtime.evaluate",
+            params: {
+              expression: `self.ensureScroll(${JSON.stringify(deltas)});`,
+              includeCommandLineAPI: false,
+              userGesture: true,
+              contextId,
+              timeout: SHORT_TIMEOUT
+            }
+          }
+        };
+        const retVal2 = mouseEvent(e, deltaX, deltaY);
+        retVal = [retVal1,retVal2];
+      } else {
+        retVal = mouseEvent(e, deltaX, deltaY);
+      }
       return retVal;
-      break;
     }
     case "auth-response": {
       const {requestId, authResponse} = e;
@@ -94,7 +116,6 @@ function translator(e, handled = {type:'case'}) {
           ignoreHash: true
         }
       }
-      break;
     }
     case "typing-syncValue": {
       if ( ! e.encodedValue ) return;
@@ -112,7 +133,6 @@ function translator(e, handled = {type:'case'}) {
           ignoreHash: true
         }
       }
-      break;
     }
     case "typing-deleteContentBackward": {
       if ( ! e.encodedValueToDelete ) return;
@@ -129,7 +149,6 @@ function translator(e, handled = {type:'case'}) {
           requiresShot: true
         }
       }
-      break;
     }
     case "url-address": {
       return {
@@ -139,8 +158,43 @@ function translator(e, handled = {type:'case'}) {
             url: e.address
           },
           requiresLoad: true,
-          requiresShot: true
+          requiresShot: true,
+          requiresTailShot: true
         }
+      }
+    }
+    case "setDocument": {
+      const {frameId,sessionId,html} = e;
+      if ( frameId ) {
+        return {
+          command: {
+            name: "Page.setDocumentContent",
+            params: {
+              html, frameId, sessionId
+            }, 
+            requiresShot: true,
+          }
+        };
+      } else {
+        return {chain:[
+          {
+            command: {
+              name: "Page.getFrameTree",
+              params: {}
+            }
+          },
+          ({frameTree:{frame:{id:frameId}}}) => {
+            return {
+              command: {
+                name: "Page.setDocumentContent",
+                params: {
+                  html, frameId
+                }, 
+                requiresShot: true,
+              }
+            };
+          }
+        ]};
       }
     }
     case "history": {
@@ -151,7 +205,7 @@ function translator(e, handled = {type:'case'}) {
               requiresLoad: e.action == "reload",
               requiresShot: e.action == "reload",
               name: e.action == "reload" ? "Page.reload" : "Page.stopLoading",
-              params: {}
+              params: {},
             }
           };
         }
@@ -165,7 +219,7 @@ function translator(e, handled = {type:'case'}) {
             },
             ({currentIndex, entries}) => {
               const intendedEntry = entries[currentIndex + (e.action == "back" ? -1 : +1 )]; 
-              if ( !! intendedEntry ) {
+              if ( intendedEntry ) {
                 return {
                   command: {
                     name: "Page.navigateToHistoryEntry",
@@ -173,12 +227,16 @@ function translator(e, handled = {type:'case'}) {
                       entryId: intendedEntry.id
                     }, 
                     requiresLoad: true,
-                    requiresShot: true
+                    requiresShot: true,
+                    requiresTailShot: true
                   }
                 };
               } 
             }
           ]};
+        }
+        default: {
+          throw new TypeError(`Unkown history action ${e.action}`);
         }
       }
     }
@@ -217,6 +275,7 @@ function translator(e, handled = {type:'case'}) {
     }
     case "zoom": {
       /** retval does not work. Expanding pinch is OK, but contracting seems to fail **/
+      /*
       const retVal = {
         command: {
           name: "Input.synthesizePinchGesture",
@@ -232,6 +291,7 @@ function translator(e, handled = {type:'case'}) {
           extraWait: 300
         }
       };
+      */
       /** so we are using emulation and multiplying the scale factor in the event listener **/
       const retVal2 = {
         command: {
@@ -293,14 +353,22 @@ function translator(e, handled = {type:'case'}) {
       return retVal;
     }
     case "window-bounds-preImplementation": {
-      // This is here until Browser.getWindowForTarget and Browser.setWindowBounds come online
-      let {width,height} = e;
+      let {width,height,mobile} = e;
       width = parseInt(width);
       height = parseInt(height);
       const retVal = {
         command: {
-          name: "Emulation.setVisibleSize",
-          params: {width,height},
+          name: "Emulation.setDeviceMetricsOverride",
+          params: {
+            width,
+            height,
+            mobile,
+            deviceScaleFactor:1,
+            screenOrientation: {
+              angle: 90,
+              type: 'landscapePrimary'
+            }
+          }
         },
         requiresShot: true,
       };
@@ -364,6 +432,17 @@ function translator(e, handled = {type:'case'}) {
           }
         }))
       ]};
+    }
+    case "describeNode": {
+      const {backendNodeId} = e;
+      return {
+        command: {
+          name: "DOM.describeNode",
+          params: {
+            backendNodeId
+          }
+        }
+      };
     }
     case "getElementInfo": {
       return {chain:[
@@ -445,6 +524,15 @@ function translator(e, handled = {type:'case'}) {
         }
       };
     }
+    case "isFirefox": {
+      return {
+        command: {
+          isZombieLordCommand: true,
+          name: "Connection.setIsFirefox",
+          params: {}
+        }
+      };
+    }
     case "clearAllPageHistory": {
       return {chain:[
         {
@@ -519,7 +607,7 @@ function mouseEvent(e, deltaX = 0, deltaY = 0) {
         type: "mouseWheel",
         deltaX, deltaY
       },
-      requiresShot: true
+      requiresShot: true,
     }
   };
 }
@@ -531,7 +619,7 @@ function keyEvent(e, modifiers = 0, SYNTHETIC = false) {
   modifiers = modifiers || encodeModifiers(e.originalEvent);
   let type;
   if ( e.originalType == "keydown" ) {
-    if ( !! text ) 
+    if ( text ) 
       type = "keyDown";
     else 
       type = "rawKeyDown";
@@ -584,14 +672,31 @@ function encodeModifiers(originalEvent) {
 }
 
 function adjustWheelDeltaByMode(delta, mode) {
+  if ( delta == 0 ) return delta;
+  let threshold = Math.abs(delta) > THRESHOLD_DELTA;
+  if ( ! threshold ) {
+    delta = Math.sqrt(Math.abs(delta))*Math.sign(delta);
+  }
   switch(mode) {
     case DOM_DELTA_PIXEL:
+      //console.log("pix mode", delta);
+      if ( threshold && Math.abs(delta) < MIN_PIX_DELTA ) {
+        delta = Math.sign(delta)*MIN_PIX_DELTA;
+      }
       break;
     case DOM_DELTA_LINE:
+      //console.log("line mode", delta);
       delta = delta * LINE_HEIGHT_GUESS;
+      if ( threshold && Math.abs(delta) < MIN_DELTA ) {
+        delta = Math.sign(delta)*MIN_DELTA;
+      }
       break;
     case DOM_DELTA_PAGE:
+      //console.log("page mode", delta);
       delta = delta * self.ViewportHeight;
+      if ( threshold && Math.abs(delta) < MIN_DELTA ) {
+        delta = Math.sign(delta)*MIN_DELTA;
+      }
       break;
   }
   return delta;

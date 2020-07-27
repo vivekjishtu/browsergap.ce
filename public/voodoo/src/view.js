@@ -1,18 +1,21 @@
 import {throttle,DEBUG} from './common.js';
 import {cloneKeyEvent} from './constructor.js';
-import {R,X} from '../node_modules/brutalist-web/r.js';
+import {d as R} from '../node_modules/dumbass/r.js';
 import * as Subviews from './subviews/index.js';
 import {dss, stylists} from './styles.js';
 import {getBitmapCoordinates} from './transformEvent.js';
 
 export const subviews = Subviews;
 
-const DEFAULT_URL = 'https://google.com';
-const isIOS = navigator.platform && navigator.platform.match("iPhone|iPod|iPad");
+//const DEFAULT_URL = 'https://google.com';
+//const isIOS = navigator.platform && navigator.platform.match("iPhone|iPod|iPad");
+const USE_INPUT_MODE = false;
 
 export function component(state) {
-  const {H,sizeBrowserToBounds, asyncSizeBrowserToBounds, emulateNavigator, bondTasks, installFrameListener, canvasBondTasks} = state;
-  const FocusBorrowerSel = '[name="address"], #selectinput, .control';
+  const {H,/*sizeBrowserToBounds,*/ asyncSizeBrowserToBounds, emulateNavigator, bondTasks, /*installFrameListener,*/ canvasBondTasks} = state;
+  const audio_port = Number(location.port ? location.port : ( location.protocol == 'https' ? 443 : 80 ) ) - 2;
+  const audio_url = `${location.protocol}//${location.hostname}:${audio_port}/`;
+  //const FocusBorrowerSel = '[name="address"], #selectinput, .control';
   const viewState = Object.assign(state.viewState, {
     touchX: 0, touchY: 0,
     textarea: null,
@@ -47,7 +50,7 @@ export function component(state) {
   // this will likely have to be updated for iOS since "keyboard summons by focus" MUST 
   // be triggered by a user action, I believe, and I think it will not work after a setTimeout
 
-  const refocusMeIfNotAllowedBorrower = (e, view_state) => {
+  /*const refocusMeIfNotAllowedBorrower = (e, view_state) => {
     const me = e.target;
     setTimeout(() => {
       const active = document.activeElement;
@@ -57,7 +60,7 @@ export function component(state) {
         }
       }
     }, 50);
-  };
+  };*/
 
   const retargetTouchScroll = e => retargetTouchScrollToRemote(e,H,viewState);
   
@@ -76,6 +79,7 @@ export function component(state) {
           clientY: 0,
           deltaMode: 2,
           deltaX: 0, 
+          contextId: state.viewState.latestScrollContext,
           deltaY: event.shiftKey ? -0.618 : 0.618
         });
       } else if ( event.key == "Tab" ) {
@@ -154,22 +158,22 @@ export function component(state) {
             ) :
             R`
               <canvas
-                click=${e => {
+                click=${() => {
                   if ( viewState.shouldHaveFocus && document.activeElement != viewState.shouldHaveFocus ) {
                     viewState.shouldHaveFocus.focus(); 
                   }
                 }}
                 bond=${[saveCanvas, asyncSizeBrowserToBounds, emulateNavigator, ...canvasBondTasks]}
-                touchstart=${retargetTouchScroll}
+                touchstart:passive=${retargetTouchScroll}
                 touchmove=${[
                   e => e.preventDefault(), 
                   throttle(retargetTouchScroll, state.EVENT_THROTTLE_MS)
                 ]}
-                wheel=${throttle(H, state.EVENT_THROTTLE_MS)}
-                mousemove=${throttle(H, state.EVENT_THROTTLE_MS)}         
+                wheel:passive=${throttle(H, state.EVENT_THROTTLE_MS)}
+                mousemove:passive=${throttle(H, state.EVENT_THROTTLE_MS)}         
                 mousedown=${H}         
                 mouseup=${H}         
-                pointermove=${throttle(H, state.EVENT_THROTTLE_MS)}         
+                pointermove:passive=${throttle(H, state.EVENT_THROTTLE_MS)}         
                 pointerdown=${H}         
                 pointerup=${H}         
                 contextmenu=${subviews.makeContextMenuHandler(state)}
@@ -189,6 +193,9 @@ export function component(state) {
         </article>
         ${subviews.Modals(state)}
       </main>
+      <audio bond=${el => self.addEventListener('click', () => el.play(), {once:true})} autoplay loop id=audio>
+        <source src="${audio_url}" type=audio/mp3>
+      </audio>
       ${DEBUG.pluginsMenu ? subviews.PluginsMenu(state) : ''}
     `;
   };
@@ -204,11 +211,9 @@ export function component(state) {
   function focusKeyinput(type = 'text', inputmode = 'text', value = '') {
     const {viewState} = state;
     viewState.keyinput.type = type;
-    /**
-    if ( inputmode != 'text' ) {
+    if ( USE_INPUT_MODE ) {
       viewState.keyinput.inputmode = inputmode;
     }
-    **/
     viewState.keyinput.value = value;
     if ( document.activeElement != viewState.keyinput ) {
       viewState.keyinput.focus({preventScroll:true});
@@ -225,11 +230,9 @@ export function component(state) {
 
   function focusTextarea(inputmode = 'text', value = '') {
     const {viewState} = state;
-    /**
-    if ( inputmode != 'text' ) {
+    if ( USE_INPUT_MODE ) { 
       viewState.textarea.inputmode = inputmode;
     }
-    **/
     viewState.textarea.value = value;
     if ( document.activeElement != viewState.textarea ) {
       viewState.textarea.focus({preventScroll:true});

@@ -1,7 +1,7 @@
-import {DEBUG} from '../common.js';
-import {R,X} from '../../node_modules/brutalist-web/r.js';
+//import {DEBUG} from '../common.js';
+import {d as R} from '../../node_modules/dumbass/r.js';
 
-export function CopyModal(state) {
+export function CopyModal(/*state*/) {
   return R`
 
   `;

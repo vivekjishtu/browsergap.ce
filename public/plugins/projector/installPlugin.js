@@ -1,6 +1,11 @@
 import {
-   getViewWindow, updateTree, handleTreeUpdate, 
-   handleTreeDiff, scrollToTop, scrollTo
+   getViewWindow, 
+   /*
+   updateTree, 
+   handleTreeUpdate, 
+   handleTreeDiff, 
+   */
+   scrollTo
 } from './scripts/treeUpdate.js';
 import {createFrameListener, createDOMTreeGetter} from './scripts/createListener.js';
 
@@ -14,8 +19,8 @@ export default function installPlugin(state, queue) {
   state.installFrameListener = createFrameListener(queue, state);
   state.getDOMSnapshot = createDOMTreeGetter(queue, state.SHORT_DELAY);
 
-  queue.addMetaListener('treeUpdate', meta => handleTreeUpdate(meta, state));
-  queue.addMetaListener('treeDiff', meta => handleTreeDiff(meta, state));
+  //queue.addMetaListener('treeUpdate', meta => handleTreeUpdate(meta, state));
+  //queue.addMetaListener('treeDiff', meta => handleTreeDiff(meta, state));
   queue.addMetaListener('navigated', meta => handleNavigate(meta, state));
   queue.addMetaListener('domSnapshot', meta => console.log(meta, state));
 
@@ -26,7 +31,7 @@ export default function installPlugin(state, queue) {
 
   state.addListener('activateTab', ()  => {
     const win = getViewWindow(state);
-    const {activeTarget, clearViewport, lastTarget} = state;
+    const {activeTarget, lastTarget} = state;
     const lastCache = state.domCache.get(lastTarget);
     const cache = state.domCache.get(activeTarget);
     if ( ! cache  ) {
@@ -35,13 +40,13 @@ export default function installPlugin(state, queue) {
     } else {
       // save scroll position of last target before we update window
       // using block scope oorah
-      if ( !! lastCache ) {
+      if ( lastCache ) {
         const {pageXOffset:scrollX,pageYOffset:scrollY} = win;
         Object.assign(lastCache,{scrollX,scrollY});
       }
 
       state.clearViewport();
-      updateTree(cache, state); 
+      //updateTree(cache, state); 
 
       // restore scroll position of new target
       const {scrollX, scrollY} = cache;

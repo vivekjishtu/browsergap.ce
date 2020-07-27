@@ -1,4 +1,4 @@
-import {R,X} from '../../node_modules/brutalist-web/r.js';
+import {d as R} from '../../node_modules/dumbass/r.js';
 import {saveClick} from './controls.js';
 
 const USE_DDG = false;
@@ -65,7 +65,7 @@ export function OmniBox(state) {
 }
 
 export function focusOmniBox() {
-  if ( !! omniBoxInput ) {
+  if ( omniBoxInput ) {
     omniBoxInput.focus();
   }
 }

@@ -1,17 +1,18 @@
-import {spawn} from 'child_process';
+//import {spawn} from 'child_process';
 import ws from 'ws';
 import fetch from 'node-fetch';
 import fs from 'fs';
 import path from 'path';
 import {URL} from 'url';
 import {unescape} from 'querystring';
-import {DEBUG,sleep,CONNECTION_ID_URL, SECURE_VIEW_SCRIPT} from '../common.js';
+import {DEBUG,sleep,SECURE_VIEW_SCRIPT} from '../common.js';
 import {username} from '../args.js';
 import {WorldName} from '../public/translateVoodooCRDP.js';
 import {makeCamera} from './screenShots.js';
 import {blockAds,onInterceptRequest as adBlockIntercept} from './adblocking/blockAds.js';
+import {fileChoosers} from '../ws-server.js';
 //import {overrideNewtab,onInterceptRequest as newtabIntercept} from './newtab/overrideNewtab.js';
-import {blockSites,onInterceptRequest as whitelistIntercept} from './demoblocking/blockSites.js';
+//import {blockSites,onInterceptRequest as whitelistIntercept} from './demoblocking/blockSites.js';
 
 // standard injections
 const selectDropdownEvents = fs.readFileSync(path.join(__dirname, 'injections', 'selectDropdownEvents.js')).toString();
@@ -33,24 +34,31 @@ const injectionsScroll = botDetectionEvasions + favicon + keysCanInputEvents + s
 const pageContextInjectionsScroll = botDetectionEvasions;
 
 const RECONNECT_MS = 5000;
-const deskUA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/70.0.3538.102 Safari/537.36";
+const WAIT_FOR_DOWNLOAD_BEGIN_DELAY = 5000;
+const WAIT_FOR_COALESCED_NETWORK_EVENTS = 1000
+//const deskUA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/70.0.3538.102 Safari/537.36";
 const mobUA = "Mozilla/5.0 (Linux; Android 8.1.0) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/70.0.3384.0 Mobile Safari/537.36";
 const LANG = "en-US";
-const deskPLAT = "Win32";
+//const deskPLAT = "Win32";
 const mobPLAT = "Android";
-const GrantedPermissions = ["geolocation", "notifications", "flash"];
-const PromptText = "Dosy was here.";
+const GrantedPermissions = ["geolocation", "notifications", "flash", "midi"];
+//const PromptText = "Dosy was here.";
 const ROOT_SESSION = 'root';
+
+// for fun
+const Area51Lat = 37.234332396;
+const Area51Long = -115.80666344;
 
 const UA = mobUA;
 const PLAT = mobPLAT;
 
 const targets = new Set(); 
-const waiting = new Map();
+//const waiting = new Map();
 const sessions = new Map();
 const loadings = new Map();
 const tabs = new Map();
-const originalMessage = new Map();
+const Frames = new Map();
+//const originalMessage = new Map();
 
 let AD_BLOCK_ON = true;
 let DEMO_BLOCK_ON = false;
@@ -88,11 +96,11 @@ function removeSession(id) {
   sessions.delete(otherId);
 }
 
-let id = 0;
+//let id = 0;
 
 export default async function Connect({port}, {adBlock:adBlock = true, demoBlock: demoBlock = false} = {}) {
   AD_BLOCK_ON = adBlock;
-  if ( !! demoBlock ) {
+  if ( demoBlock ) {
     AD_BLOCK_ON = false;
     DEMO_BLOCK_ON = true;
   }
@@ -102,6 +110,7 @@ export default async function Connect({port}, {adBlock:adBlock = true, demoBlock
     browserTargetId: null,
     loadingCount: 0,
     totalBandwidth: 0,
+    record: {},
     frameBuffer: [],
     meta: [],
     pausing: new Map(),
@@ -123,7 +132,12 @@ export default async function Connect({port}, {adBlock:adBlock = true, demoBlock
       Object.assign(connection,next_connection);
     }, RECONNECT_MS);
   });
-  connection.doShot = makeCamera(connection);
+
+  {
+    const {doShot, queueTailShot} = makeCamera(connection);
+    connection.doShot = doShot;
+    connection.queueTailShot = queueTailShot;
+  }
 
   const {send,on, ons} = connection.zombie;
 
@@ -133,7 +147,7 @@ export default async function Connect({port}, {adBlock:adBlock = true, demoBlock
   ! DEBUG.legacyShots && await send("HeadlessExperimental.enable", {});
   await send("Target.setDiscoverTargets", {discover:true});
   await send("Target.setAutoAttach", {
-    autoAttach:true, 
+    autoAttach:false, 
     waitForDebuggerOnStart:false, 
     flatten:true, 
     windowOpen:true
@@ -218,7 +232,7 @@ export default async function Connect({port}, {adBlock:adBlock = true, demoBlock
       let {payload} = message.params;
       try {
         payload = JSON.parse(payload);
-      } catch(e) {console.warn(e)};
+      } catch(e) {console.warn(e)}
 
       let response;
       if ( !!payload.method && !! payload.params ) {
@@ -240,27 +254,33 @@ export default async function Connect({port}, {adBlock:adBlock = true, demoBlock
       const consoleMessage = message.params;
       const {args,executionContextId} = consoleMessage;
 
+      // console.log(JSON.stringify(consoleMessage));
+
       try {
         DEBUG.val && console.log(executionContextId, consoleMessage.args[0].value.slice(0,255));
-      } catch(e) {}
+      } finally {
+        void 0;
+      }
 
       if ( ! args.length ) return;
 
       const activeContexts = connection.worlds.get(connection.sessionId);
       DEBUG.val > DEBUG.low && console.log(`Active context`, activeContexts);
-      if ( false && (! activeContexts || ! activeContexts.has(executionContextId) ) ) {
+      /*if ( ! activeContexts || ! activeContexts.has(executionContextId) ) {
         DEBUG.val && console.log(`Blocking as is not a context in the active target.`);
         return;
-      }
+      }*/
       message = consoleMessage;
       const firstArg = args[0];
       try {
         message = JSON.parse(firstArg.value);
         message.executionContextId = executionContextId;
         connection.meta.push(message);
-      } catch(e) {}
-
-      DEBUG.val > DEBUG.med && connection.meta.push({consoleMessage});
+      } catch(e) {
+        void 0;
+      } finally {
+        DEBUG.val > DEBUG.med && connection.meta.push({consoleMessage});
+      }
     } else if ( message.method == "Runtime.executionContextCreated" ) {
       DEBUG.val && console.log(JSON.stringify({createdContext:message.params.context}));
       const {name:worldName, id:contextId} = message.params.context;
@@ -314,73 +334,143 @@ export default async function Connect({port}, {adBlock:adBlock = true, demoBlock
           "Browser.grantPermissions", 
           {
             origin, permissions: GrantedPermissions
+          }
+        );
+        await send(
+          "Emulation.setGeolocationOverride",
+          {
+            latitude: Area51Lat, longitude: Area51Long, accuracy: 5
           },
           sessionId
         );
       }
     } else if ( message.method == "Page.fileChooserOpened" ) {
-      const {mode} = message.params;
+      const {mode,backendNodeId} = message.params;
       const fileChooser = {mode, sessionId};
+
+      fileChoosers.set(sessionId, backendNodeId);
+
       DEBUG.val > DEBUG.med && console.log(fileChooser, message);
+
+      const {node:{attributes:fileInputAttributes}} = await send("DOM.describeNode", {
+        backendNodeId
+      }, sessionId);
+
+      if ( fileInputAttributes ) {
+        for( let i = 0; i < fileInputAttributes.length; i++ ) {
+          if ( fileInputAttributes[i] == "accept" ) {
+            fileChooser.accept = fileInputAttributes[i+1];
+            break;
+          }
+        }
+      }
+
       connection.meta.push({fileChooser});
     } else if ( message.method == "Page.downloadWillBegin" ) {
       const {params:download} = message;
-      download.sessionId = sessionId;
-      connection.meta.push({download});
+      const {suggestedFilename} = download;
+
       const downloadFileName = getFileFromURL(download.url);
-      DEBUG.val > DEBUG.med && console.log({downloadFileName,SECURE_VIEW_SCRIPT,username});
-      const subshell = spawn(SECURE_VIEW_SCRIPT, [username, `"${downloadFileName}"`]);
-      let uri = '';
-      subshell.stdout.on('data', data => {
-        uri += data;
-      });
-      subshell.stdout.on('end', async (code = 0) => {
-        if ( code == 0 ) {
-          // trim any whitespace added by the shell echo in the script
-          const url  = uri.trim();
-          const secureview = {url};
-          DEBUG.val > DEBUG.med && console.log("Send secure view", secureview);
-          connection.meta.push({secureview});
-        } else {
-          console.warn(`Secure View subshell exited with code ${code}`);
-        }
-      });
+
+      download.sessionId = sessionId;
+      download.filename = downloadFileName;
+
+      DEBUG.val && console.log({download});
+      DEBUG.val && console.log({suggestedFilename});
+
+      // notification and only do once
+        connection.meta.push({download});
+        connection.lastDownloadFileName = downloadFileName;
+
+      // logging 
+        DEBUG.val > DEBUG.med && console.log({downloadFileName,SECURE_VIEW_SCRIPT,username});
+
       /**
-        subshell.on('close', async code => {
-          if ( code == 0 ) {
+        // This shouldn't be in the community edition
+        const subshell = spawn(SECURE_VIEW_SCRIPT, [username, `${downloadFileName}`]);
+        let uri = '';
+
+        // subshell collect data and send once
+          subshell.stderr.pipe(process.stderr);
+          subshell.stdout.on('data', data => {
+            uri += data;
+          });
+          subshell.stdout.on('end', sendURL);
+          subshell.on('close', sendURL);
+          subshell.on('exit', sendURL);
+
+        async function sendURL(code) {
+          if ( ! uri ) {
+            console.warn("No URI", downloadFileName);
+            //throw new Error( "No URI" );
+          }
+          if ( connection.lastSentFileName == connection.lastDownloadFileName ) return;
+          connection.lastSentFileName = connection.lastDownloadFileName;
+          if ( ! code ) {
             // trim any whitespace added by the shell echo in the script
             const url  = uri.trim();
             const secureview = {url};
-            console.log("Send secure view", secureview);
+            DEBUG.val > DEBUG.med && console.log("Send secure view", secureview);
             connection.meta.push({secureview});
           } else {
             console.warn(`Secure View subshell exited with code ${code}`);
           }
-        });
-        subshell.on('exit', async code => {
-          if ( code == 0 ) {
-            // trim any whitespace added by the shell echo in the script
-            const url  = uri.trim();
-            const secureview = {url};
-            console.log("Send secure view", secureview);
-            connection.meta.push({secureview});
-          } else {
-            console.warn(`Secure View subshell exited with code ${code}`);
-          }
-        });
+        }
       **/
     } else if ( message.method == "Network.requestWillBeSent" ) {
       const resource = startLoading(sessionId);
+      const {requestId,frameId, request:{url}} = message.params;
+      if ( requestId && frameId ) {
+        Frames.set(requestId,{url,frameId});
+      }
       connection.meta.push({resource}); 
     } else if ( message.method == "Network.requestServedFromCache" ) {
       const resource = endLoading(sessionId);
+      const {requestId} = message.params;
       connection.meta.push({resource}); 
+      setTimeout(() => Frames.delete(requestId), WAIT_FOR_COALESCED_NETWORK_EVENTS);
     } else if ( message.method == "Network.loadingFinished" ) {
       const resource = endLoading(sessionId);
+      const {requestId} = message.params;
       connection.meta.push({resource}); 
+      setTimeout(() => Frames.delete(requestId), WAIT_FOR_COALESCED_NETWORK_EVENTS);
     } else if ( message.method == "Network.loadingFailed" ) {
       const resource = endLoading(sessionId);
-      connection.meta.push({resource}); 
+      const {requestId} = message.params;
+      const savedFrame = Frames.get(requestId)
+      if ( savedFrame ) {
+        const {url,frameId} = savedFrame;
+
+        const someFileName = getFileFromURL(url);
+
+        if ( message.params.type == "Document" ) {
+          message.frameId = frameId;
+          DEBUG.val && console.log({failedURL:url});
+          if ( !url.startsWith('http') ) {
+            const modal = {
+              type: 'intentPrompt',
+              title: 'External App Request',
+              message: `This page is asking to open an external app via URL: ${url}`,
+              url
+            };
+            DEBUG.val && console.log(JSON.stringify({modal},null,2));
+            connection.meta.push({modal});
+          } else {
+            setTimeout(() => {
+              if ( someFileName == connection.lastDownloadFileName ) {
+                // this is not a failure 
+              } else {
+                connection.meta.push({failed:message});
+              }
+            }, WAIT_FOR_DOWNLOAD_BEGIN_DELAY );
+          }
+        }
+
+        connection.meta.push({resource}); 
+        setTimeout(() => Frames.delete(requestId), WAIT_FOR_COALESCED_NETWORK_EVENTS);
+      } else {
+        console.warn(`No url or frameId saved for requestId: ${requestId}`);
+      }
     } else if ( message.method == "Network.responseReceived" ) {
       const resource = endLoading(sessionId);
       connection.meta.push({resource}); 
@@ -395,7 +485,7 @@ export default async function Connect({port}, {adBlock:adBlock = true, demoBlock
         //whitelistIntercept({sessionId, message}, Target);
       }
     } else if ( message.method == "Fetch.authRequired" ) {
-      const {requestId, request, frameId, resourceType, authChallenge} = message.params;
+      const {requestId, request, /*frameId, */ resourceType, authChallenge} = message.params;
       connection.pausing.set(requestId, request.url);
       connection.pausing.set(request.url, requestId);
       const authRequired = {authChallenge, requestId, resourceType};
@@ -434,10 +524,12 @@ export default async function Connect({port}, {adBlock:adBlock = true, demoBlock
           handleAuthRequests: true,
           patterns: [
             {
-              urlPatterns: 'http://*/*',
+              urlPattern: 'http://*/*',
+              requestStage: "Response"
             },
             {
-              urlPatterns: 'https://*/*',
+              urlPattern: 'https://*/*',
+              requestStage: "Response"
             }
           ],
         },
@@ -493,7 +585,7 @@ export default async function Connect({port}, {adBlock:adBlock = true, demoBlock
           sessionId
         );
       await send(
-        "Emulation.setVisibleSize", 
+        "Emulation.setDeviceMetricsOverride", 
         connection.bounds,
         sessionId
       );
@@ -509,7 +601,7 @@ export default async function Connect({port}, {adBlock:adBlock = true, demoBlock
       );
       //id = await overrideNewtab(connection.zombie, sessionId, id);
       if ( AD_BLOCK_ON ) {
-        await blockAds(connection.zombie, sessionId);
+        await blockAds(/*connection.zombie, sessionId*/);
       } else if ( DEMO_BLOCK_ON ) {
         console.warn("Demo block disabled.");
         //await blockSites(connection.zombie, sessionId);
@@ -540,9 +632,8 @@ export default async function Connect({port}, {adBlock:adBlock = true, demoBlock
         return {};
       }
     }
-    if ( command.name == "Emulation.setVisibleSize" ) {
-      connection.bounds.width = command.params.width;
-      connection.bounds.height = command.params.height;
+    if ( command.name == "Emulation.setDeviceMetricsOverride" ) {
+      Object.assign(connection.bounds, command.params);
     }
     if ( command.name == "Emulation.setScrollbarsHidden" ) {
       connection.hideBars = command.params.hidden;
@@ -564,7 +655,7 @@ export default async function Connect({port}, {adBlock:adBlock = true, demoBlock
         that.sessionId = null;
       }
       removeSession(targetId);
-      if ( !!tSessionId ) {
+      if ( tSessionId ) {
         DEBUG.val > DEBUG.med && console.log("Received close. Will send detach first.");
         // FIX NOTE: these sleeps (have not test ms sensitivity, maybe we could go lower), FIX issue #130
         // in other words, they prevent the seg fault crash on Target.closeTarget we get sometimes
@@ -579,7 +670,7 @@ export default async function Connect({port}, {adBlock:adBlock = true, demoBlock
       connection.pausing.delete(requestId);
       connection.pausing.delete(url);
     }
-    if ( !command.name.startsWith("Target") ) {
+    if ( !command.name.startsWith("Target") && !(command.name.startsWith("Browser") && command.name != "Browser.getWindowForTarget") ) {
       sessionId = command.params.sessionId || that.sessionId;
     } else if ( command.name == "Target.activateTarget" ) {
       that.sessionId = sessions.get(targetId); 
@@ -589,14 +680,14 @@ export default async function Connect({port}, {adBlock:adBlock = true, demoBlock
       if ( ! worlds ) {
         DEBUG.val && console.log("reloading because no worlds we can access yet");
         await send("Page.reload", {}, sessionId);
-
+      } else {
+        DEBUG.val && console.log("Activate",sessionId);
       }
-      DEBUG.val && console.log("Activate",sessionId);
     }
     if ( command.name.startsWith("Target") || ! sessionId ) {
       if ( command.name.startsWith("Page") || command.name.startsWith("Runtime") ) {
         sessionId = that.sessionId;
-        if ( !! sessionId ) {
+        if ( sessionId ) {
           return await send(command.name, command.params, sessionId); 
         } else {
           DEBUG.val && console.log(`Blocking as ${command.name} must be run with session.`, command);
@@ -604,7 +695,8 @@ export default async function Connect({port}, {adBlock:adBlock = true, demoBlock
         }
       } else {
         DEBUG.val > DEBUG.med && console.log({zombieNoSessionCommand:command});
-        return await send(command.name, command.params); 
+        const resp = await send(command.name, command.params); 
+        return resp;
       }
     } else {
       sessionId = command.params.sessionId || that.sessionId;
@@ -630,7 +722,9 @@ export default async function Connect({port}, {adBlock:adBlock = true, demoBlock
             removeSession(e.request.params.sessionId);
             DEBUG.val > DEBUG.med && console.log("Removed session");
           }
-        } catch(e2) {}
+        } finally {
+          void 0;
+        }
       }
     }
   }
@@ -656,9 +750,9 @@ export default async function Connect({port}, {adBlock:adBlock = true, demoBlock
 
   function deleteContext(id, contextId) {
     DEBUG.val > DEBUG.med && console.log({deletingContext:{id,contextId}});
-    const otherId = sessions.get(id);
+    //const otherId = sessions.get(id);
     let contexts = connection.worlds.get(id);
-    if ( !! contexts ) {
+    if ( contexts ) {
       contexts.delete(contextId);
     }
   }
@@ -713,7 +807,26 @@ async function makeZombie({port:port = 9222} = {}) {
     };
     const key = `${sessionId||ROOT_SESSION}:${message.id}`;
     let resolve;
-    const promise = new Promise(res => resolve = res);
+    let promise = new Promise(res => resolve = res);
+    if ( DEBUG.commands ) {
+      if ( !(message.method == "Page.captureScreenshot" && ! DEBUG.shotDebug) ) {
+        console.log({send:message});
+        promise = promise.then(resp => {
+          if ( resp && resp.data ) {
+            if ( resp.data.length < 1000 ) {
+              console.log({message,resp});
+            } else {
+              console.log(JSON.stringify({message,resp:'[long response]'},null,2));
+            }
+          } else {
+            console.log(JSON.stringify({message,resp: resp || '[no response]'},null,2));
+          }
+          return resp;
+        }).catch(err => {
+          console.warn({sendFail:err}); 
+        });
+      }
+    }
     Resolvers[key] = resolve; 
     socket.send(JSON.stringify(message));
     return promise;
@@ -723,7 +836,7 @@ async function makeZombie({port:port = 9222} = {}) {
     const stringMessage = message;
     message = JSON.parse(message);
     const {sessionId} = message;
-    const {method, params} = message;
+    const {method} = message;
     const {id, result} = message;
 
     if ( id ) {
@@ -772,7 +885,7 @@ async function makeZombie({port:port = 9222} = {}) {
   }
 
   function wrap(fn) {
-    return ({message, sessionId}) => fn(message.params)
+    return ({message}) => fn(message.params)
   }
 
   let resolve;
@@ -794,7 +907,8 @@ function getFileFromURL(url) {
   const nodes = pathname.split('/');
   let lastNode = nodes.pop();
   if ( ! lastNode ) {
-    throw Error(`URL cannot be parsed to get filename`);
+    console.warn({fileNameError: Error(`URL cannot be parsed to get filename`)});
+    return `download${Date.now()}`;
   }
   return unescape(lastNode);
 }

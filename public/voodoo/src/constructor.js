@@ -1,5 +1,4 @@
 
-  import {takeShot} from './handlers/takeShot.js';
   import {handleSelectMessage} from './handlers/selectInput.js';
   import {fetchTabs} from './handlers/targetInfo.js';
   import {demoZombie, fetchDemoTabs}  from './handlers/demo.js';
@@ -10,7 +9,7 @@
   import {resetFavicon, handleFaviconMessage} from './handlers/favicon.js';
   import EventQueue from './eventQueue.js';
   import transformEvent from './transformEvent.js';
-  import {sleep, throttle, debounce, DEBUG, BLANK, isFirefox,logit, isSafari, deviceIsMobile} from './common.js';
+  import {sleep, debounce, DEBUG, BLANK, isFirefox, isSafari, deviceIsMobile} from './common.js';
   import {component, subviews} from './view.js';
 
   import installDemoPlugin from '../../plugins/demo/installPlugin.js';
@@ -29,10 +28,10 @@
   ]);
 
   const IMMEDIATE = 0;
-  const SHORT_DELAY = 40;
+  const SHORT_DELAY = 20;
   const LONG_DELAY = 300;
   const VERY_LONG_DELAY = 60000;
-  const EVENT_THROTTLE_MS = 80;  /* 20, 40, 80 */
+  const EVENT_THROTTLE_MS = 40;  /* 20, 40, 80 */
 
   // view frame debug
   let latestRequestId = 0;
@@ -76,8 +75,8 @@
       // for firefox because it's IME does not fire inputType
       // so we have no simple way to handle deleting content backward
       // this should be FF on MOBILE only probably so that's why it's false
-      // convertTypingEventsToSyncValueEvents: isFirefox(),
-      convertTypingEventsToSyncValueEvents: false,
+      convertTypingEventsToSyncValueEvents: isFirefox() && deviceIsMobile(),
+      //convertTypingEventsToSyncValueEvents: false,
 
       // for safari to detect if pointerevents work
       DoesNotSupportPointerEvents: true,
@@ -96,6 +95,7 @@
       canvasBondTasks,
 
       // tabs
+      updateTabsTasks: [],
       lastTarget,
       activeTarget,
       tabs,
@@ -153,7 +153,7 @@
         }
       }
 
-      if ( isSafari ) {
+      if ( isSafari() ) {
         queue.send({type:"isSafari"});
       }
       if ( isFirefox() ) {
@@ -164,14 +164,12 @@
         state.hideScrollbars();
       }
 
-    let nextSend;
-
     // event handlers
       // input
       queue.addMetaListener('selectInput', meta => handleSelectMessage(meta, state));
       queue.addMetaListener('keyInput', meta => handleKeysCanInputMessage(meta, state));
       queue.addMetaListener('favicon', meta => handleFaviconMessage(meta, state));
-      queue.addMetaListener('navigated', meta => canKeysInput());
+      queue.addMetaListener('navigated', () => canKeysInput());
       queue.addMetaListener('navigated', ({navigated:{targetId}}) => resetFavicon({targetId}, state));
 
       //queue.addMetaListener('navigated', meta => takeShot(meta, state));
@@ -184,6 +182,13 @@
 
       // loading
       queue.addMetaListener('resource', meta => showLoadingIndicator(meta, state));
+      queue.addMetaListener('failed', meta => {
+        if ( meta.failed.params.type == "Document" ) {
+          // we also need to make sure the failure happens at the top level document
+          // rather than writing the top level document for any failure in a sub frame
+          writeDocument(`Request failed: ${meta.failed.params.errorText}`, meta.failed.frameId, meta.failed.sessionId);
+        }
+      });
       queue.addMetaListener('navigated', meta => resetLoadingIndicator(meta, state));
 
       if ( DEBUG.val >= DEBUG.med ) {
@@ -200,7 +205,7 @@
       // patch tabs array with changes as they come through
       queue.addMetaListener('changed', ({changed}) => {
         const tab = findTab(changed.targetId);
-        if ( !! tab ) {
+        if ( tab ) {
           Object.assign(tab, changed);
           subviews.TabList(state);
         }
@@ -210,7 +215,13 @@
       // tabs
       queue.addMetaListener('created', meta => {
         if ( meta.created.type == 'page') {
+          if ( DEBUG.activateNewTab ) {
+            if ( meta.created.url == 'about:blank' || meta.created.url == '' ) {
+              state.updateTabsTasks.push(() => setTimeout(() => activateTab(null, meta.created), LONG_DELAY));
+            }
+          }
           updateTabs();
+          sizeBrowserToBounds(state.viewState.canvasEl, meta.created.targetId);
         }
       });
       queue.addMetaListener('attached', meta => {
@@ -218,10 +229,10 @@
         if ( attached.type == 'page' ) {
           state.attached.add(attached.targetId);
 
-          if ( !! state.useViewFrame ) {
-            sizeBrowserToBounds(state.viewState.viewFrameEl);
+          if ( state.useViewFrame ) {
+            sizeBrowserToBounds(state.viewState.viewFrameEl, attached.targetId);
           } else {
-            sizeBrowserToBounds(state.viewState.canvasEl);
+            sizeBrowserToBounds(state.viewState.canvasEl, attached.targetId);
             emulateNavigator();
           }
           updateTabs();
@@ -240,19 +251,30 @@
 
       // remote secure downloads
       queue.addMetaListener('download', ({download}) => {
-        const {sessionId, frameId, url} = download;
+        const {sessionId, filename} = download;
         const modal = {
           sessionId,
           type: 'notice',
-          message: `Please purchase a license to use secure file view in Community-Edition. To purchase a license mail cris@dosycorp.com to speak with someone who will help.`,
-          title: "SecureView\u2122",
+          /*
+          message: `The file "${filename}" is downloading to this pits of hell to be consumed in eternal damnation by stinky daemons. Send bitcoins to this address to save your file. Just kidding, bitcoin is not a valid store of value. Contact cris@dosyrcorp.com for a license to use a secure file viewer, or deploy commercially. This open-source software is free to use for governments and not-for-profits. All data will be deleted at the end of your session. Also by daemons.`,
+          */
+          message: `The file "${filename}" is downloading a secure location and will be deleted at the end of your session. Contact cris@dosyrcorp.com for a license to use a secure file viewer, or to deploy commercially. This open-source software is free to use for governments and not-for-profits. See the README.md for more details.`,
+          otherButton: {
+            /*
+            title: 'Open README.md',
+            onclick: () => window.open('https://github.com/dosyago/BrowserGap/blob/master/README.md', "_blank")
+            */
+            title: 'Mail Cris',
+            onclick: () => window.open('mailto:cris@dosycorp.com?Subject=BrowserGap+License+Inquiry&body=Hi%20Cris', "_blank")
+          },
+          title: "SecureView\u2122 Not-enabled",
         };
         subviews.openModal({modal}, state);
       });
 
       queue.addMetaListener('secureview', ({secureview}) => {
         const {url} = secureview;
-        if ( !! url ) {
+        if ( url ) {
           createTab(null, url);
         }
       });
@@ -271,9 +293,9 @@
 
       // File chooser 
       queue.addMetaListener('fileChooser', ({fileChooser}) => {
-        const {sessionId, mode} = fileChooser;
+        const {sessionId, mode, accept} = fileChooser;
         const modal = {
-          sessionId, mode,
+          sessionId, mode, accept,
           type: 'filechooser',
           message: `Securely send files to the remote page.`,
           title: `File Chooser`,
@@ -285,6 +307,10 @@
     // bond tasks 
       canvasBondTasks.push(indicateNoOpenTabs);
       canvasBondTasks.push(installZoomListener);
+      canvasBondTasks.push(asyncSizeBrowserToBounds);
+      if ( isSafari() ) {
+        canvasBondTasks.push(installSafariLongTapListener);
+      }
 
       bondTasks.push(canKeysInput);
       bondTasks.push(getFavicon);
@@ -322,7 +348,7 @@
 
     const poppetView = {loadPlugin, api};
 
-    const postinstallView = {queue};
+    const postInstallView = {queue};
 
     await sleep(0);
 
@@ -341,14 +367,14 @@
     return poppetView;
 
     // closures
-      function doShot() {
+      /*function doShot() {
         setTimeout(() => {
           queue.send({
             type: "doShot",
             synthetic: true
           });
         }, SHORT_DELAY);
-      }
+      }*/
 
       function runListeners(name, data) {
         const funcList = listeners.get(name);
@@ -380,7 +406,7 @@
       function indicateNoOpenTabs() {
         if ( state.tabs.length == 0 ) {
           clearViewport();
-          if ( !! state.useViewFrame ) {
+          if ( state.useViewFrame ) {
             try {
               state.viewState.viewFrameEl.contentDocument.body.innerHTML = `
                 <em>${state.factoryMode ? 'Factory Mode' : 'Custom Mode'}. No tabs open.</em>
@@ -389,7 +415,7 @@
               console.warn(e);
             }
           } else {
-            writeCanvas("All tabs closed.");
+            writeCanvas("No tabs open.");
           }
         }
       }
@@ -405,8 +431,16 @@
         ctx.fillText(text, innerWidth/2, innerHeight/2-6*Math.max(innerWidth/100, innerHeight/100));
       }
 
+      function writeDocument(html, frameId, sessionId) {
+        queue.send({
+          type: 'setDocument',
+          html, frameId, sessionId,
+          synthetic: true
+        });
+      }
+
       function clearViewport() {
-        if ( !! state.useViewFrame ) {
+        if ( state.useViewFrame ) {
           try {
             state.viewState.viewFrameEl.contentDocument.body.innerHTML = ``;
           } catch(e) {
@@ -420,7 +454,7 @@
         }
       }
 
-      function sendKey(keyEvent) {
+      /*function sendKey(keyEvent) {
         const {viewState} = state;
         if ( document.activeElement !== viewState.keyinput && document.activeElement !== viewState.textarea ) {
           let ev = keyEvent;
@@ -430,31 +464,58 @@
           } 
           H(ev);
         }
-      }
+      }*/
 
       function installTopLevelKeyListeners() {
         //self.addEventListener('keydown', sendKey); 
         //self.addEventListener('keyup', sendKey); 
       }
 
+      function installSafariLongTapListener(el) {
+        const FLAGS = {passive:true, capture:true};
+        const MIN_DURATION = 200;
+        const MAX_MOVEMENT = 20;
+        let lastStart;
+        el.addEventListener('touchstart', ts => lastStart = ts, FLAGS);
+        el.addEventListener('touchend', triggerContextMenuIfLongEnough, FLAGS);
+        el.addEventListener('touchcancel', triggerContextMenuIfLongEnough, FLAGS);
+
+        function triggerContextMenuIfLongEnough(tf) {
+          // space 
+            const touch1 = lastStart.changedTouches[0];
+            const touch2 = tf.changedTouches[0];
+            const movement = Math.hypot(
+              touch2.pageX - touch1.pageX,
+              touch2.pageY - touch1.pageY
+            );
+          // time
+            const duration = tf.timeStamp - lastStart.timeStamp;
+          if ( duration > MIN_DURATION && movement < MAX_MOVEMENT ) {
+            lastStart.preventDefault();
+            tf.preventDefault();
+            const {pageX,pageY,clientX,clientY} = touch1;
+            el.dispatchEvent(new CustomEvent('contextmenu', {detail:{pageX,pageY,clientX,clientY}}));
+          }
+        }
+      }
+
       function installZoomListener(el) {
+        const FLAGS = {passive:true};
         let lastScale = 1.0;
         let scaling = false;
         let startDist = 0;
         let lastDist = 0;
         let touch;
 
-        el.addEventListener('touchstart', begin);
-        el.addEventListener('touchmove', move);
-        el.addEventListener('touchend', end);
-        el.addEventListener('touchcancel', end);
+        el.addEventListener('touchstart', begin, FLAGS);
+        el.addEventListener('touchmove', move, FLAGS);
+        el.addEventListener('touchend', end, FLAGS);
+        el.addEventListener('touchcancel', end, FLAGS);
 
-        el.addEventListener('wheel', sendZoom, {capture: true});
+        el.addEventListener('wheel', sendZoom, {passive:true, capture: true});
 
         function sendZoom(event) {
           if ( event.ctrlKey || event.deltaZ != 0 ) {
-            event.preventDefault();
-            event.stopPropagation();
             const delta = event.deltaZ || event.deltaY;
             const direction = Math.sign(delta);
             let multiplier;
@@ -499,7 +560,7 @@
           }
         }
 
-        function end(event) {
+        function end() {
           if ( scaling ) {
             if ( lastDist < 8 ) {
               // do nothing, 
@@ -538,9 +599,11 @@
         const mouseWheel = event.type == "wheel";
         const syntheticNonTypingEventWrapper = event.synthetic && event.type != "typing" && event.event;
       
-        if ( mouseWheel ) event.preventDefault && event.preventDefault();
-        else if ( pointerEvent ) state.DoesNotSupportPointerEvents = false;
-        else if ( syntheticNonTypingEventWrapper ) {
+        if ( mouseWheel ) {
+          // do nothing
+        } else if ( pointerEvent ) {
+          state.DoesNotSupportPointerEvents = false;
+        } else if ( syntheticNonTypingEventWrapper ) {
           event.event.preventDefault && event.event.preventDefault();
         }
 
@@ -557,22 +620,12 @@
 
         const isThrottled = ThrottledEvents.has(event.type);
         const transformedEvent = transformEvent(event);
+
+        if ( mouseWheel ) {
+          transformedEvent.contextId = state.viewState.latestScrollContext;
+        }
         
         if ( isThrottled ) {
-          // FIXME: this is not the right way to throttle
-          // because we are mixing events (pointer, touch mouse all together)
-          // and we get a delayed event, not good)
-          // for now we comment out the old code
-          /**
-          if ( !nextSend ) {
-            nextSend = setTimeout(() => {
-              nextSend = false;
-              queue.send(transformedEvent);
-            }, EVENT_THROTTLE_MS);
-          }
-          **/
-          // and send the event straight away because we will throttle 
-          // at event capture
           queue.send(transformedEvent);
         } else {
           if ( event.type == "keydown" && event.key == "Enter" ) {
@@ -593,7 +646,7 @@
           } else if ( event.type == "keyup" && event.key == "Backspace" ) {
             state.backspaceFiring = false;
           } else if ( event.type == "pointerdown" || event.type == "mousedown" ) {
-            const {timeStamp,type} = event;
+            //const {timeStamp,type} = event;
             const {latestData} = state;
             if ( !! state.viewState.shouldHaveFocus && !! latestData && latestData.length > 1 && latestData != state.latestCommitData) {
               state.isComposing = false;
@@ -617,28 +670,34 @@
         }
       }
 
-      function sizeBrowserToBounds(el) {
+      function sizeBrowserToBounds(el, targetId) {
         let {width, height} = el.getBoundingClientRect();
         width = Math.round(width);
         height = Math.round(height);
-        const {innerWidth:iw, outerWidth:ow, innerHeight:ih, outerHeight:oh} = window;
-        const {width:w, availWidth:aw, height:h, availHeight:ah} = screen;
-        if ( DEBUG.val > DEBUG.high ) {
-          logit({iw,ow,ih,oh,width,height, w, aw, h, ah});
-        }
-        if ( ! el.dataset.sized && (el.width != width || el.height != height)) {
-          el.dataset.sized = true;
+        if ( el.width != width || el.height != height ) {
           el.width = width;
           el.height = height;
         }
+        const mobile = deviceIsMobile();
+        H({ synthetic: true,
+          type: "window-bounds",
+          width,
+          height,
+          targetId: targetId || state.activeTarget
+        });
         H({ synthetic: true,
           type: "window-bounds-preImplementation",
-          width:width + 17,  /* scrollbar */
+          width,
           height,
-          targetId: state.activeTarget
+          mobile,
+          targetId: targetId || state.activeTarget
         });
         self.ViewportWidth = width;
         self.ViewportHeight = height;
+      }
+
+      function sizeTab() {
+        return sizeBrowserToBounds(state.viewState.canvasEl);
       }
 
       function asyncSizeBrowserToBounds(el) {
@@ -675,6 +734,7 @@
             requiresShot: true,
           }
         });
+        sizeTab();
         canKeysInput();
         state.lastTarget = state.activeTarget;
         state.activeTarget = targetId;
@@ -683,15 +743,37 @@
         if ( ! runListeners('activateTab') ) {
           clearViewport();
         }
+        state.active = activeTab();
         subviews.TabList(state);
         subviews.OmniBox(state);
         subviews.LoadingIndicator(state);
-        state.active = activeTab();
+        sizeBrowserToBounds(state.viewState.canvasEl);
         setTimeout(() => {
           if ( state.active && state.active.url != BLANK ) {
             canKeysInput();
           } else {
-            writeCanvas("This is a BrowserGap SecureTab.");
+            writeDocument(`
+              <!DOCTYPE html>
+                <style>
+                  :root {
+                    height: 100%;
+                    background: #${Math.floor(Math.random() * 0x1000000).toString(16).padStart(6, 0)};
+                  }
+                  h2 {
+                    background: white;
+                    font-family: system-ui;
+                  }
+                </style>
+                <h2>
+                  New Blank Browser Tab. 
+                </h2>
+                <strong>
+                  Current time: ${(new Date).toString()}
+                </strong>
+              </html>
+            `);
+            //writeDocument("Secure BrowserGap Tab.");
+            //writeDocument("Undead Tab from the Crypt of Hell. <a href=https://github.com/dosyago/BrowserGap>Spells here</a>.");
             state.viewState.omniBoxInput.focus();
           }
         }, SHORT_DELAY);
@@ -753,6 +835,14 @@
         if ( state.tabs.length == 0 ) {
           indicateNoOpenTabs();
         }
+        while(state.updateTabsTasks.length) {
+          const task = state.updateTabsTasks.shift();
+          try {
+            task();
+          } catch(e) {
+            console.warn("State update tabs task failed", e, task);
+          }
+        }
       }
 
       async function createTab(click, url = BLANK) {
@@ -768,7 +858,7 @@
       }
 
       function canKeysInput() {
-        if ( !! state.viewState.viewFrameEl ) return;
+        if ( state.viewState.viewFrameEl ) return;
         setTimeout(() => {
           queue.send({
             type: "canKeysInput",
@@ -791,15 +881,15 @@
         plugin.load(pluginView);
       }
 
-      function addToQueue(...events) {
+      function addToQueue(/*...events*/) {
         console.warn("Unimplemented");
       }
 
-      function requestRender(pluginRenderedView) {
+      function requestRender(/*pluginRenderedView*/) {
         console.warn("Unimplemented");
       }
 
-      function subscribeToQueue(name, listener) {
+      function subscribeToQueue(/*name, listener*/) {
         console.warn("Unimplemented");
       }
   }

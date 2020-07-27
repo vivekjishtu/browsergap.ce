@@ -1,3 +1,4 @@
+/* eslint-disable no-inner-declarations */
 {
   install();
 
@@ -16,7 +17,7 @@
     if ( ! target ) {
       retVal.noSuchElement = true; 
     } else {
-      if ( !! innerText ) {
+      if ( innerText ) {
         if ( target.matches('input, textarea, select, output') ) {
           retVal.innerText = target.value;
         } else if ( target.matches('img, video, audio') ) {
@@ -53,3 +54,4 @@
     console.log(JSON.stringify({elementInfo:o}));
   }
 }
+/* eslint-enable no-inner-declarations */

@@ -1,4 +1,4 @@
-import {R,X} from '../../node_modules/brutalist-web/r.js';
+import {d as R} from '../../node_modules/dumbass/r.js';
 import DEFAULT_FAVICON from './faviconDataURL.js';
 
 export function TabList(state) {

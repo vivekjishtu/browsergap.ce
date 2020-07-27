@@ -1,3 +1,4 @@
+/* eslint-disable no-inner-declarations */
 /*
   This provides event for
   when focus moves to a element
@@ -34,7 +35,7 @@
     self.addEventListener('domcontentloaded', monitorActiveElement);
     setTimeout(monitorActiveElement, 100);
     self.canKeysInput = () => monitorActiveElement(null, {alwaysNotify:true});
-    console.log(JSON.stringify({message:"Defined canKeysInput",targetId}));
+    console.log(JSON.stringify({message:"Defined canKeysInput",targetId:self.targetId}));
   }
 
   function monitorActiveElementNextTick(e) {
@@ -72,3 +73,4 @@
     console.log(JSON.stringify({keyInput:o}));
   }
 }
+/* eslint-enable no-inner-declarations */

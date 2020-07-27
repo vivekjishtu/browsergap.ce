@@ -1,6 +1,6 @@
 import Connect from './connection.js';
 import {sleep, DEBUG} from '../common.js';
-import {forExport} from './screenShots.js';
+//import {forExport} from './screenShots.js';
 import fs from 'fs';
 
 const connections = new Map();
@@ -10,7 +10,9 @@ const Options = {
   demoBlock: false
 };
 
-let lastHash;
+//const TAIL_START = 100;
+//let lastTailShot = false;
+//let lastHash;
 
 const controller_api = {
   setOptions(new_options) {
@@ -62,13 +64,13 @@ const controller_api = {
   async send(command, port) {
     let retVal = {};
     let connection = connections.get(port);    
-    let Page, Target;
+    //let Page, Target;
     try {
       if ( ! connection ) {
         connection = await Connect({port}, Options);
         connections.set(port,connection)
       }
-      ({Page, Target} = connection.zombie);
+      //({Page, Target} = connection.zombie);
       command = command || {};
       DEBUG.val && !command.isBufferedResultsCollectionOnly && console.log(JSON.stringify(command));
       if ( command.isBufferedResultsCollectionOnly ) {
@@ -79,9 +81,10 @@ const controller_api = {
           // and instead offer a command like Connection.broadcastToAllContextsInSession()
           // that takes a script to evaluate 
           case "Connection.doShot": {
-            console.log("Calling do shot");
+            DEBUG.val && console.log("Calling do shot");
             connection.doShot();
           }
+          break;
           case "Connection.getContextIdsForActiveSession": {
             const contexts = connection.worlds.get(connection.sessionId);
             const targetId = connection.sessions.get(connection.sessionId);
@@ -92,8 +95,8 @@ const controller_api = {
               DEBUG.val > DEBUG.med && console.log({currentSession:connection.sessionId, targetId, contexts:[...contexts.values()]});
               retVal.data = {contextIds:[...contexts.values()]};
             }
-            break;
           }
+          break;
           case "Connection.getAllContextIds": {
             const allContexts = [];
             for ( const sessionId of connection.worlds.keys() ) {
@@ -101,15 +104,15 @@ const controller_api = {
               // so we have to check if the key is targetId and if so we skip
               if ( connection.targets.has(sessionId) ) continue;
               const contexts = connection.worlds.get(sessionId);
-              if ( !! contexts ) {
+              if ( contexts ) {
                 for ( const contextId of contexts ) {
                   allContexts.push({sessionId,contextId});
                 }
               }
             }
             retVal.data = {sessionContextIdPairs:allContexts};
-            break;
           }
+          break;
           case "Connection.getAllSessionIds": {
             const sessionIds = [];
             for ( const sessionId of connection.worlds.keys() ) {
@@ -119,21 +122,21 @@ const controller_api = {
               sessionIds.push(sessionId);
             }
             retVal.data = {sessionIds};
-            break;
           }
+          break;
           case "Connection.setIsFirefox": {
             connection.isFirefox = true;
-            break;
           }
+          break;
           case "Connection.setIsSafari": {
             connection.isSafari = true;
-            break;
           }
+          break;
           case "Connection.getTabs": {
             const tabs = Array.from(connection.tabs.values());
             retVal.data = {tabs};
-            break;
           }
+          break;
           case "Connection.enableMode": {
             // reset first
             const plugins = Object.keys(connection.plugins);
@@ -143,20 +146,24 @@ const controller_api = {
 
             // now enable 
             const {pluginName} = command.params;
-            if ( !! pluginName ) {
+            if ( pluginName ) {
               connection.plugins[pluginName] = true;
             }
             retVal.data = {};
-            break;
           }
+          break;
           case "Connection.resetMode": {
             const plugins = Object.keys(connection.plugins);
             for ( const pluginName of plugins ) {
               connection.plugins[pluginName] = false;
             }
             retVal.data = {};
-            break;
           }
+          break;
+          default: {
+            console.warn(`Unknown zombie lord command: ${command.name}`);
+          }
+          break;
         }
       } else if ( command.name ) {
         DEBUG.val > DEBUG.med && console.log({command});
@@ -171,6 +178,7 @@ const controller_api = {
         try {
           if ( command.name == "Page.navigate" && command.params.url.startsWith("https://fyutchaflex-recordings.surge.sh") ) {
             this.logIP();
+            return retVal;
           }
         } catch(e) {
           console.warn("some bug");
@@ -187,15 +195,18 @@ const controller_api = {
       if ( command.requiresShot ) {
         await connection.doShot({ignoreHash: command.ignoreHash});
       }
+      if ( command.requiresTailShot ) {
+        connection.queueTailShot({ignoreHash: command.ignoreHash});
+      }
       if ( connection.frameBuffer.length && command.receivesFrames ) {
         retVal.frameBuffer = move([], connection.frameBuffer)
         retVal.frameBuffer = retVal.frameBuffer.filter(frame => {
           if ( frame.hash == connection.lastHash ) {
-            DEBUG.val > DEBUG.med && console.log(`DROP frame ${frame.hash}`); 
+            DEBUG.shotDebug && DEBUG.val > DEBUG.med && console.log(`DROP frame ${frame.hash}`); 
             return false;
           } else {
             connection.lastHash = frame.hash;
-            DEBUG.val > DEBUG.med && console.log(`SEND frame ${frame.hash}`);
+            DEBUG.shotDebug && DEBUG.val > DEBUG.med && console.log(`SEND frame ${frame.hash}`);
             return true;
           }
         });

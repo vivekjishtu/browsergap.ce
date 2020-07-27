@@ -1,8 +1,6 @@
-import {DEBUG} from '../common.js';
-import {R,X} from '../../node_modules/brutalist-web/r.js';
+//import {DEBUG} from '../common.js';
+import {d as R} from '../../node_modules/dumbass/r.js';
 import {PluginsMenuButton} from './pluginsMenuButton.js';
-
-let pmEl;
 
 export function PluginsMenu(state, {
       bondTasks: bondTasks = [], 
@@ -11,7 +9,7 @@ export function PluginsMenu(state, {
   return R`
     <nav class=plugins-menu 
       bond=${[
-        el => pmEl = state.viewState.pmEl = el, 
+        el => state.viewState.pmEl = el, 
         () => console.log(`PMA?${!!state.pluginsMenuActive}`), 
         ...bondTasks
       ]} 

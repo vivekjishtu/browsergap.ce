@@ -4,7 +4,6 @@
   import zl from './zombie-lord/api.js';
   import path from 'path';
   import bodyParser from 'body-parser';
-  import {DEBUG} from './common.js';
   import {timedSend, eventSendLoop} from './server.js';
 
   const options = {
@@ -32,7 +31,7 @@
       app.post(`/api/${version}/zombie`, async (req,res) => {
         const Data = [], Frames = [], Meta = [];
 
-        const {events} = req.body;	
+        const {events} = req.body;  
         
         await eventSendLoop(events, {Data, Frames, Meta});
 

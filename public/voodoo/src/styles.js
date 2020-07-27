@@ -20,7 +20,7 @@ export const dss = {
 };
 
 // stylists
-  function styleDocument(el, state) {
+  function styleDocument(/*el, state*/) {
     return `
       :root {
         height: 100%;
@@ -101,7 +101,7 @@ export const dss = {
     `;
   }
 
-  function styleTabList(el, state) {
+  function styleTabList(/*el, state*/) {
     return `
       nav ul {
       }
@@ -142,7 +142,7 @@ export const dss = {
     `;
   }
 
-  function styleTabSelector(el, state) {
+  function styleTabSelector(/*el, state*/) {
     return `
       li.tab-selector {
         display: inline-flex;
@@ -154,6 +154,7 @@ export const dss = {
         position: relative;
         height: 2rem;
         background: transparent;
+        background: rgba(200,210,220,0.6);
         padding-left: 0.5rem;
       }
       
@@ -165,7 +166,7 @@ export const dss = {
       }
 
       li.tab-selector:not(.active) {
-        opacity: 0.7;
+        opacity: 0.8;
       }
 
       li.tab-selector:not(.active):hover {
@@ -242,7 +243,7 @@ export const dss = {
     `;
   }
 
-  function styleNavControl(el, state) {
+  function styleNavControl(/*el, state*/) {
     return `
       @media screen and (max-width: 600px) {
         nav.aux {
@@ -258,7 +259,6 @@ export const dss = {
         line-height: 2em;
         background: transparent;
       }
-
       
       nav:not(.targets) {
         padding: 0.35rem 0;
@@ -301,7 +301,7 @@ export const dss = {
         display: flex;
       }
 
-      ${isSafari?
+      ${isSafari()?
         `nav button, nav input {
           -webkit-appearance: none;
           -moz-appearance: none;
@@ -339,11 +339,16 @@ export const dss = {
       nav form.kbd-input textarea {
         opacity: 0;
         border: 0;
+
+        -webkit-user-select: none;
+        -moz-user-select: none;
+        user-select: none;
+        -webkit-touch-callout: none;
       }
     `;
   }
 
-  function styleOmniBox(el, state) {
+  function styleOmniBox(/*el, state*/) {
     return `
       input:not(:focus), input[disabled] {
         background: var(--verylightgrey);
@@ -362,7 +367,7 @@ export const dss = {
       }
       
       ${
-        isSafari? `
+        isSafari()? `
           input {
             -webkit-appearance: none;
           }
@@ -371,7 +376,7 @@ export const dss = {
     `;
   }
 
-  function styleHistoryForm(el, state) {
+  function styleHistoryForm(/*el, state*/) {
     return `
       form button.back {
         background-image: url(./voodoo/asset-imports/nhsuk-icons/icon-chevron-left.svg);
@@ -383,7 +388,7 @@ export const dss = {
     `;
   }
 
-  function styleURLForm(el, state) {
+  function styleURLForm(/*el, state*/) {
     return `
       form {
         position: relative;
@@ -488,7 +493,7 @@ export const dss = {
     `;
   }
 
-  function stylePluginsMenuButton(el, state) {
+  function stylePluginsMenuButton(/*el, state*/) {
     return `
       nav.plugins-menu-button {
         grid-area: plugins-menu-button;
@@ -531,7 +536,7 @@ export const dss = {
     `;
   }
 
-  function styleOldPluginsMenu(el, state) {
+  /*function styleOldPluginsMenu(el, state) {
     return `
       nav.plugins-menu {
         grid-area: plugins-menu;
@@ -571,9 +576,9 @@ export const dss = {
         }
       }
     `;
-  }
+  }*/
 
-  function styleBandwidthIndicator(el, state) {
+  function styleBandwidthIndicator(/*el, state*/) {
     return `
       aside.bandwidth-indicator {
         display: flex;
@@ -601,7 +606,7 @@ export const dss = {
     `;
   }
 
-  function styleLoadingIndicator(el, state) {
+  function styleLoadingIndicator(/*el, state*/) {
     return `
       aside.loading-indicator {
         grid-area: pending;
@@ -639,7 +644,7 @@ export const dss = {
     `;
   }
 
-  function styleTabViewport(el, state) {
+  function styleTabViewport(/*el, state*/) {
     return `
       article.tab-viewport {
         grid-area: viewport;
@@ -668,12 +673,13 @@ export const dss = {
       }
 
       * canvas {
-        image-rendering: crisp-edges;
+        image-rendering: high-quality;
+        -webkit-touch-callout: none;
       }
     `;
   }
 
-  function styleSelectInput(el, state) {
+  function styleSelectInput(/*el, state*/) {
     return `
       #selectinput {
         position: absolute;
@@ -691,7 +697,7 @@ export const dss = {
     `;
   }
 
-  function styleModals(el, state) {
+  function styleModals(/*el, state*/) {
     return `
       aside {
         position: absolute;
@@ -748,7 +754,7 @@ export const dss = {
     `;
   }
 
-  function styleContextMenu(el, state) {
+  function styleContextMenu(/*el, state*/) {
     return `
       * .context-menu {
         position: absolute;
